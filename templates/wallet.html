@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+{% block title %}Wallet | SK BATTLE{% endblock %}
+{% block content %}
+
+<section class="page-head">
+    <div class="eyebrow">PLAYER ACCOUNT</div>
+    <h1>My Wallet</h1>
+    <p class="muted">Manage your coin balance and deposit requests.</p>
+</section>
+
+<div class="wallet-balance">
+    <div>
+        <small>AVAILABLE BALANCE</small>
+        <h2>🪙 {{ user.balance }} <span>SK Coin</span></h2>
+        <p>{{ user.username }} · {{ user.user_code }}</p>
+    </div>
+    <div class="wallet-symbol">₿</div>
+</div>
+
+<div class="two-col">
+
+    <section class="panel">
+        <div class="panel-heading">
+            <h2>Coin Add Request</h2>
+            <span class="pill">Deposit</span>
+        </div>
+
+        <p class="muted small">
+            After making a payment, enter the Transaction ID and coin amount.
+            The Admin will verify the payment and add the coins.
+        </p>
+
+        <form method="post" action="{{ url_for('create_deposit_request') }}" class="stack-form">
+
+            <label>
+                Amount (INR)
+                <input type="number" name="amount_inr" min="1" required placeholder="e.g. 100">
+            </label>
+
+            <label>
+                Requested SK Coin
+                <input type="number" name="requested_coins" min="1" required placeholder="e.g. 100">
+            </label>
+
+            <label>
+                Transaction ID / Reference
+                <input name="transaction_ref" required placeholder="Payment reference">
+            </label>
+
+            <label>
+                Note (Optional)
+                <textarea name="note" rows="3" placeholder="Additional information"></textarea>
+            </label>
+
+            <button class="btn btn-primary btn-block" type="submit">Submit Request</button>
+        </form>
+    </section>
+
+    <section class="panel">
+        <div class="panel-heading">
+            <h2>Deposit Requests</h2>
+        </div>
+
+        {% if deposits %}
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Amount</th>
+                        <th>Coin</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for d in deposits %}
+                    <tr>
+                        <td>{{ d.created_at }}</td>
+                        <td>₹{{ d.amount_inr }}</td>
+                        <td>{{ d.requested_coins }}</td>
+                        <td>
+                            <span class="status-text {{ d.status|lower }}">{{ d.status }}</span>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="empty-state compact">No deposit requests yet.</div>
+        {% endif %}
+    </section>
+
+</div>
+
+<section class="panel section">
+    <div class="panel-heading">
+        <h2>Transaction History</h2>
+    </div>
+
+    {% if txs %}
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Type</th>
+                    <th>Description</th>
+                    <th>Coin</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for tx in txs %}
+                <tr>
+                    <td>{{ tx.created_at }}</td>
+                    <td>{{ tx.kind }}</td>
+                    <td>{{ tx.note }}</td>
+                    <td class="{{ 'positive' if tx.amount > 0 else 'negative' }}">
+                        {{ '+' if tx.amount > 0 else '' }}{{ tx.amount }}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="empty-state compact">No transactions yet.</div>
+    {% endif %}
+</section>
+
+{% endblock %}
