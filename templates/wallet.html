@@ -1,131 +1,64 @@
 {% extends "base.html" %}
-{% block title %}Wallet | SK BATTLE{% endblock %}
+{% block title %}My Wallet | SK BATTLE{% endblock %}
 {% block content %}
-
-<section class="page-head">
-    <div class="eyebrow">PLAYER ACCOUNT</div>
+<style>
+.wallet-wrap{max-width:1000px;margin:0 auto}.wallet-hero{background:linear-gradient(135deg,#07152e,#102b51);border:1px solid #19d9ff;border-radius:18px;padding:26px;margin-bottom:22px;color:#fff;box-shadow:0 12px 32px #0002}.wallet-hero .eyebrow{color:#36e7ff;font-size:12px;letter-spacing:2px;font-weight:700}.wallet-hero h1{margin:8px 0;font-size:30px}.wallet-balance{font-size:38px;font-weight:800;color:#35e7ff}.wallet-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}.wallet-box{padding:22px;border:1px solid var(--border,#dbe2ea);border-radius:16px;background:var(--panel,#fff);margin-bottom:20px}.wallet-box h2{margin:0 0 16px}.wallet-box label{display:block;font-weight:600;margin:12px 0}.wallet-box input,.wallet-box select,.wallet-box textarea{display:block;width:100%;box-sizing:border-box;margin-top:7px;padding:11px 12px;border:1px solid #b9c5d4;border-radius:9px;background:transparent;color:inherit}.wallet-box .btn{margin-top:10px}.wallet-hint{font-size:13px;opacity:.78;line-height:1.6}.wallet-table{width:100%;border-collapse:collapse}.wallet-table th,.wallet-table td{text-align:left;padding:12px;border-bottom:1px solid #d9e0e8;font-size:14px}.wallet-table th{font-size:12px;text-transform:uppercase;opacity:.75}.wallet-scroll{overflow-x:auto}.wallet-status{display:inline-block;border-radius:30px;padding:4px 9px;background:#e7eef8;color:#17375f;font-size:12px;font-weight:700}.wallet-empty{padding:20px;text-align:center;opacity:.7}@media(max-width:700px){.wallet-grid{grid-template-columns:1fr}.wallet-hero{padding:20px}.wallet-balance{font-size:32px}.wallet-table{min-width:650px}}
+</style>
+<div class="wallet-wrap">
+  <section class="wallet-hero">
+    <div class="eyebrow">SK BATTLE • PLAYER WALLET</div>
     <h1>My Wallet</h1>
-    <p class="muted">Manage your coin balance and deposit requests.</p>
-</section>
+    <div class="wallet-balance">{{ user.balance }} <span style="font-size:17px">SK Coins</span></div>
+    <p style="margin:8px 0 0;opacity:.85">Player ID: {{ user.user_code or ('SK%06d'|format(user.id)) }} · {{ user.username }}</p>
+  </section>
 
-<div class="wallet-balance">
-    <div>
-        <small>AVAILABLE BALANCE</small>
-        <h2>🪙 {{ user.balance }} <span>SK Coin</span></h2>
-        <p>{{ user.username }} · {{ user.user_code }}</p>
-    </div>
-    <div class="wallet-symbol">₿</div>
-</div>
+  {% with messages = get_flashed_messages() %}{% if messages %}<div class="flash-messages">{% for message in messages %}<div class="flash">{{ message }}</div>{% endfor %}</div>{% endif %}{% endwith %}
 
-<div class="two-col">
-
-    <section class="panel">
-        <div class="panel-heading">
-            <h2>Coin Add Request</h2>
-            <span class="pill">Deposit</span>
-        </div>
-
-        <p class="muted small">
-            After making a payment, enter the Transaction ID and coin amount.
-            The Admin will verify the payment and add the coins.
-        </p>
-
-        <form method="post" action="{{ url_for('create_deposit_request') }}" class="stack-form">
-
-            <label>
-                Amount (INR)
-                <input type="number" name="amount_inr" min="1" required placeholder="e.g. 100">
-            </label>
-
-            <label>
-                Requested SK Coin
-                <input type="number" name="requested_coins" min="1" required placeholder="e.g. 100">
-            </label>
-
-            <label>
-                Transaction ID / Reference
-                <input name="transaction_ref" required placeholder="Payment reference">
-            </label>
-
-            <label>
-                Note (Optional)
-                <textarea name="note" rows="3" placeholder="Additional information"></textarea>
-            </label>
-
-            <button class="btn btn-primary btn-block" type="submit">Submit Request</button>
-        </form>
+  <div class="wallet-grid">
+    <section class="wallet-box">
+      <h2>➕ Add SK Coins</h2>
+      <p class="wallet-hint">Payment করার পর Amount, কত Coin চাও এবং Transaction ID দিয়ে Request পাঠাও। Admin যাচাই করে approve করলে Coin যোগ হবে।</p>
+      <form method="post" action="{{ url_for('create_deposit_request') }}">
+        <label>Paid Amount (₹)<input type="number" name="amount_inr" min="1" max="10000000" required placeholder="যেমন 100"></label>
+        <label>Requested SK Coins<input type="number" name="requested_coins" min="1" max="10000000" required placeholder="যেমন 100"></label>
+        <label>Transaction ID / UTR<input type="text" name="transaction_ref" maxlength="200" required placeholder="Payment reference"></label>
+        <label>Note (optional)<textarea name="note" rows="2" maxlength="500" placeholder="Optional details"></textarea></label>
+        <button class="btn btn-primary" type="submit">Send Coin Request</button>
+      </form>
     </section>
 
-    <section class="panel">
-        <div class="panel-heading">
-            <h2>Deposit Requests</h2>
-        </div>
-
-        {% if deposits %}
-        <div class="table-wrap">
-            <table>
-                <thead>
-                    <tr>
-                        <th>Date</th>
-                        <th>Amount</th>
-                        <th>Coin</th>
-                        <th>Status</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for d in deposits %}
-                    <tr>
-                        <td>{{ d.created_at }}</td>
-                        <td>₹{{ d.amount_inr }}</td>
-                        <td>{{ d.requested_coins }}</td>
-                        <td>
-                            <span class="status-text {{ d.status|lower }}">{{ d.status }}</span>
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-        {% else %}
-        <div class="empty-state compact">No deposit requests yet.</div>
-        {% endif %}
+    <section class="wallet-box">
+      <h2>↗ Withdraw SK Coins</h2>
+      <p class="wallet-hint">Coin withdrawal request দিলে Coin balance থেকে সাময়িকভাবে আটকে রাখা হবে। Admin request approve করে payout পাঠাবে, অথবা reject করলে Coin ফেরত আসবে। টাকা ও Coin-এর conversion rate Admin-এর নিয়ম অনুযায়ী হবে।</p>
+      <form method="post" action="{{ url_for('create_withdrawal_request') }}" data-confirm="Withdraw request পাঠাবে? Coin balance থেকে Coin আটকে রাখা হবে।">
+        <label>Coin Amount<input type="number" name="coins" min="1" max="10000000" required placeholder="কত SK Coins তুলবে"></label>
+        <label>Payout Method<select name="payout_method"><option value="UPI">UPI</option><option value="Bank Transfer">Bank Transfer</option></select></label>
+        <label>UPI ID / Payout Details<input type="text" name="payout_details" maxlength="200" required placeholder="তোমার UPI ID বা payout details"></label>
+        <label>Note (optional)<textarea name="note" rows="2" maxlength="500" placeholder="Optional details"></textarea></label>
+        <button class="btn btn-primary" type="submit">Request Withdrawal</button>
+      </form>
     </section>
+  </div>
 
+  <section class="wallet-box">
+    <h2>Withdrawal Requests</h2>
+    {% if withdrawals %}<div class="wallet-scroll"><table class="wallet-table"><thead><tr><th>Request</th><th>Coins</th><th>Method</th><th>Payout Details</th><th>Status</th><th>Created</th></tr></thead><tbody>
+      {% for w in withdrawals %}<tr><td>#{{ w.id }}</td><td>{{ w.coins }}</td><td>{{ w.payout_method }}</td><td>{{ w.payout_details }}</td><td><span class="wallet-status">{{ w.status }}</span></td><td>{{ w.created_at }}</td></tr>{% endfor %}
+    </tbody></table></div>{% else %}<div class="wallet-empty">No withdrawal requests yet.</div>{% endif %}
+  </section>
+
+  <section class="wallet-box">
+    <h2>Deposit Requests</h2>
+    {% if deposits %}<div class="wallet-scroll"><table class="wallet-table"><thead><tr><th>Request</th><th>Amount</th><th>Requested Coins</th><th>Transaction Ref</th><th>Status</th><th>Date</th></tr></thead><tbody>
+      {% for d in deposits %}<tr><td>#{{ d.id }}</td><td>₹{{ d.amount_inr }}</td><td>{{ d.requested_coins }}</td><td>{{ d.transaction_ref }}</td><td><span class="wallet-status">{{ d.status }}</span></td><td>{{ d.created_at }}</td></tr>{% endfor %}
+    </tbody></table></div>{% else %}<div class="wallet-empty">No deposit requests yet.</div>{% endif %}
+  </section>
+
+  <section class="wallet-box">
+    <h2>Transaction History</h2>
+    {% if txs %}<div class="wallet-scroll"><table class="wallet-table"><thead><tr><th>Type</th><th>Coins</th><th>Details</th><th>Date</th></tr></thead><tbody>
+      {% for tx in txs %}<tr><td>{{ tx.kind }}</td><td style="font-weight:700;color:{{ '#159447' if tx.amount > 0 else '#d34a4a' }}">{{ '+' if tx.amount > 0 else '' }}{{ tx.amount }}</td><td>{{ tx.note }}</td><td>{{ tx.created_at }}</td></tr>{% endfor %}
+    </tbody></table></div>{% else %}<div class="wallet-empty">No transactions yet.</div>{% endif %}
+  </section>
 </div>
-
-<section class="panel section">
-    <div class="panel-heading">
-        <h2>Transaction History</h2>
-    </div>
-
-    {% if txs %}
-    <div class="table-wrap">
-        <table>
-            <thead>
-                <tr>
-                    <th>Date</th>
-                    <th>Type</th>
-                    <th>Description</th>
-                    <th>Coin</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for tx in txs %}
-                <tr>
-                    <td>{{ tx.created_at }}</td>
-                    <td>{{ tx.kind }}</td>
-                    <td>{{ tx.note }}</td>
-                    <td class="{{ 'positive' if tx.amount > 0 else 'negative' }}">
-                        {{ '+' if tx.amount > 0 else '' }}{{ tx.amount }}
-                    </td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
-    {% else %}
-    <div class="empty-state compact">No transactions yet.</div>
-    {% endif %}
-</section>
-
 {% endblock %}
