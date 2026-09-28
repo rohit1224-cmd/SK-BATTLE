@@ -81,6 +81,31 @@ def load_data():
 def save_data(data):
     DB.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
+def enrich_matches(data):
+    """Attach live registration counts and normalized slot limits to matches."""
+    with db_conn() as conn:
+        counts = {row["match_id"]: row["n"] for row in conn.execute(
+            "SELECT match_id, COUNT(*) AS n FROM registrations WHERE status='Registered' GROUP BY match_id"
+        ).fetchall()}
+    for match in data.get("matches", []):
+        try:
+            limit = int(match.get("max_slots", 0) or 0)
+        except (TypeError, ValueError):
+            limit = 0
+        # Migrate old "current/maximum" slot text when no explicit limit exists.
+        if limit <= 0:
+            import re
+            parts = re.findall(r"\\d+", str(match.get("slots", "")))
+            limit = int(parts[-1]) if len(parts) >= 2 else (int(parts[0]) if parts else 48)
+        count = int(counts.get(int(match.get("id", 0)), 0))
+        match["max_slots"] = max(1, limit)
+        match["registered_count"] = count
+        match["slots"] = f"{count}/{match['max_slots']}"
+        if count >= match["max_slots"] and str(match.get("status", "")).lower() in ("registration open", "open", "registration is open"):
+            match["status"] = "Slot Full"
+    return data
+
+
 
 # --- App PIN gate (PIN 3569). Change APP_PIN in the hosting environment to override.
 from flask import abort
@@ -204,7 +229,7 @@ def add_match():
         "game": request.form.get("game","FREE FIRE").strip(),
         "date": request.form.get("date",""), "time": request.form.get("time",""),
         "entry": request.form.get("entry","Free").strip(), "prize": request.form.get("prize","").strip(),
-        "slots": request.form.get("slots","0/48").strip(), "status": request.form.get("status","Registration Open").strip(),
+        "slots": "0/" + str(max(1, int(request.form.get("max_slots", "48") or 48))), "max_slots": max(1, int(request.form.get("max_slots", "48") or 48)), "status": request.form.get("status","Registration Open").strip(),
         "room_id": request.form.get("room_id","").strip(), "room_password": request.form.get("room_password","").strip(),
         "image": ""
     }
@@ -225,7 +250,7 @@ def edit_match(match_id):
     data = load_data()
     match = next((m for m in data["matches"] if m.get("id") == match_id), None)
     if match:
-        for key in ["title","game","date","time","entry","prize","slots","status","room_id","room_password"]:
+        for key in ["title","game","date","time","entry","prize","status","room_id","room_password"]:
             match[key] = request.form.get(key, match.get(key,"")).strip()
         img = request.files.get("image")
         if img and img.filename:
@@ -339,6 +364,19 @@ def join_match(match_id):
             conn.execute("BEGIN IMMEDIATE")
             if conn.execute("SELECT 1 FROM registrations WHERE user_id=? AND match_id=?",(session["user_id"],match_id)).fetchone():
                 conn.rollback(); flash("You have already joined this tournament."); return redirect(url_for("my_matches"))
+            try:
+                max_slots = int(match.get("max_slots", 0) or 0)
+            except (TypeError, ValueError):
+                max_slots = 0
+            if max_slots <= 0:
+                import re
+                nums = re.findall(r"\\d+", str(match.get("slots", "")))
+                max_slots = int(nums[-1]) if len(nums) >= 2 else (int(nums[0]) if nums else 48)
+            count = conn.execute("SELECT COUNT(*) FROM registrations WHERE match_id=? AND status='Registered'", (match_id,)).fetchone()[0]
+            if count >= max_slots:
+                conn.rollback()
+                flash("This tournament is full. Registration is closed.")
+                return redirect(url_for("home"))
             u=conn.execute("SELECT balance FROM users WHERE id=?",(session["user_id"],)).fetchone()
             if not u or u["balance"] < fee:
                 conn.rollback(); flash(f"Insufficient SK Coins. Entry fee: {fee} SK Coins."); return redirect(url_for("wallet"))
@@ -368,6 +406,37 @@ def admin_credit():
         conn.execute("UPDATE users SET balance=balance+? WHERE id=?",(amount,uid))
         conn.execute("INSERT INTO transactions(user_id,amount,kind,note) VALUES(?,?,?,?)",(uid,amount,"Admin Credit","Admin added SK Coin"))
     flash(f"{amount} SK Coins have been added to the user's wallet.")
+    return redirect(url_for("admin"))
+
+@app.route("/admin/wallet/debit", methods=["POST"])
+def admin_debit():
+    if not admin_required():
+        return redirect(url_for("admin_login"))
+    try:
+        uid = int(request.form.get("user_id", "0"))
+        amount = int(request.form.get("amount", "0"))
+    except ValueError:
+        flash("Please enter a valid user ID and coin amount.")
+        return redirect(url_for("admin"))
+    if amount <= 0 or amount > 10000000:
+        flash("Coin amount must be between 1 and 10,000,000.")
+        return redirect(url_for("admin"))
+    with db_conn() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        user = conn.execute("SELECT balance FROM users WHERE id=?", (uid,)).fetchone()
+        if not user:
+            conn.rollback()
+            flash("User not found.")
+            return redirect(url_for("admin"))
+        if user["balance"] < amount:
+            conn.rollback()
+            flash("User does not have enough coins.")
+            return redirect(url_for("admin"))
+        conn.execute("UPDATE users SET balance=balance-? WHERE id=?", (amount, uid))
+        conn.execute("INSERT INTO transactions(user_id,amount,kind,note) VALUES(?,?,?,?)",
+                     (uid, -amount, "Admin Debit", "Coins deducted by Admin"))
+        conn.commit()
+    flash(f"{amount} SK Coins deducted from user #{uid}.")
     return redirect(url_for("admin"))
 
 @app.route("/api/data")
