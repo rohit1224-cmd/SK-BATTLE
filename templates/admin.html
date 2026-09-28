@@ -1,0 +1,315 @@
+{% extends "base.html" %}
+
+{% block title %}Admin Panel | SK BATTLE{% endblock %}
+
+{% block content %}
+
+<section class="page-head admin-head">
+    <div>
+        <div class="eyebrow">CONTROL ROOM</div>
+        <h1>Admin Dashboard</h1>
+        <p class="muted">Manage app settings, tournaments, and wallet requests.</p>
+    </div>
+    <a class="btn btn-outline" href="{{ url_for('admin_logout') }}">Admin Logout</a>
+</section>
+
+<section class="panel section">
+    <div class="panel-heading">
+        <h2>App Settings</h2>
+    </div>
+
+    <form method="post" class="admin-settings">
+        <label>
+            App Name
+            <input name="app_name" value="{{ data.app_name }}" required>
+        </label>
+
+        <label>
+            Notice
+            <textarea name="notice" rows="2">{{ data.notice }}</textarea>
+        </label>
+
+        <label>
+            APK Download URL
+            <input type="url" name="apk_url" value="{{ data.apk_url }}" placeholder="https://...">
+        </label>
+
+        <button class="btn btn-primary" type="submit">Save Settings</button>
+    </form>
+</section>
+
+<section class="panel section">
+    <div class="panel-heading">
+        <h2>Add New Tournament</h2>
+    </div>
+
+    <form method="post" action="{{ url_for('add_match') }}" enctype="multipart/form-data" class="admin-form">
+
+        <label>
+            Title
+            <input name="title" required placeholder="Solo Battle">
+        </label>
+
+        <label>
+            Game
+            <input name="game" value="FREE FIRE" required>
+        </label>
+
+        <label>
+            Date
+            <input type="date" name="date" required>
+        </label>
+
+        <label>
+            Time
+            <input name="time" placeholder="8:00 PM" required>
+        </label>
+
+        <label>
+            Entry Fee
+            <input name="entry" value="Free" required>
+        </label>
+
+        <label>
+            Prize Pool
+            <input name="prize" placeholder="₹500" required>
+        </label>
+
+        <label>
+            Slots
+            <input name="slots" value="0/48" required>
+        </label>
+
+        <label>
+            Status
+            <select name="status">
+                <option>Registration Open</option>
+                <option>Registration Closed</option>
+                <option>Completed</option>
+            </select>
+        </label>
+
+        <label class="wide">
+            Cover Image
+            <input type="file" name="image" accept="image/*">
+        </label>
+
+        <button class="btn btn-primary" type="submit">Add Tournament</button>
+    </form>
+</section>
+
+<section class="panel section">
+    <div class="panel-heading">
+        <h2>Current Tournaments</h2>
+    </div>
+
+    {% if data.matches %}
+        {% for m in data.matches %}
+
+        <details class="admin-match">
+            <summary>
+                <span>
+                    <b>{{ m.title }}</b>
+                    <small>{{ m.game }} · {{ m.date }} · {{ m.status }}</small>
+                </span>
+                <span class="pill">Edit</span>
+            </summary>
+
+            <form method="post" action="{{ url_for('edit_match', match_id=m.id) }}" enctype="multipart/form-data" class="admin-form edit-form">
+
+                <label>
+                    Title
+                    <input name="title" value="{{ m.title }}" required>
+                </label>
+
+                <label>
+                    Game
+                    <input name="game" value="{{ m.game }}" required>
+                </label>
+
+                <label>
+                    Date
+                    <input type="date" name="date" value="{{ m.date }}">
+                </label>
+
+                <label>
+                    Time
+                    <input name="time" value="{{ m.time }}">
+                </label>
+
+                <label>
+                    Entry Fee
+                    <input name="entry" value="{{ m.entry }}">
+                </label>
+
+                <label>
+                    Prize Pool
+                    <input name="prize" value="{{ m.prize }}">
+                </label>
+
+                <label>
+                    Slots
+                    <input name="slots" value="{{ m.slots }}">
+                </label>
+
+                <label>
+                    Status
+                    <select name="status">
+                        <option {% if m.status == 'Registration Open' %}selected{% endif %}>Registration Open</option>
+                        <option {% if m.status == 'Registration Closed' %}selected{% endif %}>Registration Closed</option>
+                        <option {% if m.status == 'Completed' %}selected{% endif %}>Completed</option>
+                    </select>
+                </label>
+
+                <label>
+                    Room ID
+                    <input name="room_id" value="{{ m.room_id }}">
+                </label>
+
+                <label>
+                    Room Password
+                    <input name="room_password" value="{{ m.room_password }}">
+                </label>
+
+                <label class="wide">
+                    Replace Image
+                    <input type="file" name="image" accept="image/*">
+                </label>
+
+                <button class="btn btn-primary" type="submit">Save Changes</button>
+            </form>
+
+            <form method="post" action="{{ url_for('delete_match', match_id=m.id) }}" data-confirm="Are you sure you want to delete this tournament?" class="delete-form">
+                <button class="btn btn-danger" type="submit">Delete Tournament</button>
+            </form>
+        </details>
+
+        {% endfor %}
+    {% else %}
+        <p class="muted">No tournaments available.</p>
+    {% endif %}
+</section>
+
+<section class="panel section">
+    <div class="panel-heading">
+        <h2>Deposit Requests</h2>
+    </div>
+
+    {% if deposits %}
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>User</th>
+                    <th>Amount</th>
+                    <th>Requested Coins</th>
+                    <th>Reference</th>
+                    <th>Status</th>
+                    <th>Action</th>
+                </tr>
+            </thead>
+
+            <tbody>
+                {% for d in deposits %}
+                <tr>
+                    <td>
+                        {{ d.username }}
+                        <small class="table-sub">{{ d.user_code }}</small>
+                    </td>
+
+                    <td>₹{{ d.amount_inr }}</td>
+                    <td>{{ d.requested_coins }}</td>
+
+                    <td>
+                        {{ d.transaction_ref }}
+                        {% if d.note %}
+                        <small class="table-sub">{{ d.note }}</small>
+                        {% endif %}
+                    </td>
+
+                    <td>{{ d.status }}</td>
+
+                    <td>
+                        {% if d.status == 'Pending' %}
+
+                        <form method="post" action="{{ url_for('approve_deposit', req_id=d.id) }}" class="inline-form">
+                            <input type="number" name="approved_coins" min="1" value="{{ d.requested_coins }}" required aria-label="Approved coins">
+                            <button class="btn btn-small btn-primary" type="submit">Approve</button>
+                        </form>
+
+                        <form method="post" action="{{ url_for('reject_deposit', req_id=d.id) }}" data-confirm="Are you sure you want to reject this request?">
+                            <button class="btn btn-small btn-danger" type="submit">Reject</button>
+                        </form>
+
+                        {% else %}
+                        —
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    {% else %}
+    <div class="empty-state compact">No deposit requests available.</div>
+    {% endif %}
+</section>
+
+<section class="panel section">
+    <div class="panel-heading">
+        <h2>Add Coins to User Wallet</h2>
+    </div>
+
+    <form method="post" action="{{ url_for('admin_credit') }}" class="admin-form">
+
+        <label>
+            User ID
+            <input type="number" name="user_id" min="1" required placeholder="User ID">
+        </label>
+
+        <label>
+            Coin Amount
+            <input type="number" name="amount" min="1" required placeholder="Enter coin amount">
+        </label>
+
+        <button class="btn btn-primary" type="submit">Add Coins</button>
+    </form>
+</section>
+
+<section class="panel section">
+    <div class="panel-heading">
+        <h2>Registered Users</h2>
+        <span class="pill">{{ users|length }} Users</span>
+    </div>
+
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Name</th>
+                    <th>Email</th>
+                    <th>Player Code</th>
+                    <th>Balance</th>
+                    <th>Joined</th>
+                </tr>
+            </thead>
+
+            <tbody>
+                {% for u in users %}
+                <tr>
+                    <td>{{ u.id }}</td>
+                    <td>{{ u.username }}</td>
+                    <td>{{ u.email }}</td>
+                    <td>{{ u.user_code }}</td>
+                    <td>{{ u.balance }}</td>
+                    <td>{{ u.created_at }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+
+{% endblock %}
