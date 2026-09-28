@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Login | SK BATTLE{% endblock %}
+{% block content %}
+
+<section class="auth-shell">
+    <div class="auth-art">
+        <div class="badge-ring">SK</div>
+        <h2>Welcome Back<br>to the Battlefield!</h2>
+        <p>Log in and join your next match.</p>
+    </div>
+
+    <div class="form-panel">
+        <div class="eyebrow">PLAYER LOGIN</div>
+        <h1>Login</h1>
+        <p class="muted">Sign in to your account.</p>
+
+        <form method="post" class="stack-form">
+            <label>
+                Email Address
+                <input type="email" name="email" placeholder="name@example.com" required>
+            </label>
+
+            <label>
+                Password
+                <input type="password" name="password" placeholder="Enter your password" required>
+            </label>
+
+            <button class="btn btn-primary btn-block" type="submit">Log In</button>
+        </form>
+
+        <p class="form-foot">
+            Don't have an account?
+            <a href="{{ url_for('signup') }}">Sign Up</a>
+        </p>
+    </div>
+</section>
+
+{% endblock %}
