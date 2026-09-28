@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}My Matches | SK BATTLE{% endblock %}
+{% block content %}
+
+<section class="page-head">
+    <div class="eyebrow">YOUR ARENA</div>
+    <h1>My Matches</h1>
+    <p class="muted">Tournaments you have joined.</p>
+</section>
+
+{% if registered %}
+<div class="match-grid">
+    {% for item in registered %}
+    {% set match = item.match %}
+
+    <article class="match-card">
+        <div class="match-cover">
+            {% if match.image %}
+                <img src="{{ match.image }}" alt="{{ match.title }}">
+            {% else %}
+                <div class="cover-placeholder">
+                    <span>SK</span>
+                    <small>BATTLE ARENA</small>
+                </div>
+            {% endif %}
+            <span class="status">{{ item.status }}</span>
+        </div>
+
+        <div class="match-body">
+            <div class="eyebrow">{{ match.game }}</div>
+            <h3>{{ match.title }}</h3>
+
+            <div class="match-meta">
+                <span>📅 {{ match.date }}</span>
+                <span>🕒 {{ match.time }}</span>
+            </div>
+
+            <div class="match-stats">
+                <div>
+                    <small>ENTRY FEE</small>
+                    <strong>{{ match.entry }}</strong>
+                </div>
+                <div>
+                    <small>PRIZE POOL</small>
+                    <strong class="prize">{{ match.prize }}</strong>
+                </div>
+            </div>
+
+            {% if match.room_id %}
+            <div class="room-box">
+                <small>ROOM ID</small>
+                <strong>{{ match.room_id }}</strong>
+
+                {% if match.room_password %}
+                <small>ROOM PASSWORD</small>
+                <strong>{{ match.room_password }}</strong>
+                {% endif %}
+            </div>
+            {% else %}
+            <p class="muted small">Room details will appear here once the Admin publishes them.</p>
+            {% endif %}
+        </div>
+    </article>
+
+    {% endfor %}
+</div>
+
+{% else %}
+<div class="empty-state">
+    <h3>You Haven't Joined Any Matches Yet</h3>
+    <p>Explore tournaments and join your first match.</p>
+    <a class="btn btn-primary" href="{{ url_for('home') }}">Explore Tournaments</a>
+</div>
+{% endif %}
+
+{% endblock %}
