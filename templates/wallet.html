@@ -30,7 +30,7 @@
     <section class="wallet-box">
       <h2>↗ Withdraw SK Coins</h2>
       <p class="wallet-hint">Coin withdrawal request দিলে Coin balance থেকে সাময়িকভাবে আটকে রাখা হবে। Admin request approve করে payout পাঠাবে, অথবা reject করলে Coin ফেরত আসবে। টাকা ও Coin-এর conversion rate Admin-এর নিয়ম অনুযায়ী হবে।</p>
-      <form method="post" action="{{ url_for('create_withdrawal_request') }}" data-confirm="Withdraw request পাঠাবে? Coin balance থেকে Coin আটকে রাখা হবে।">
+      <form method="post" action="{{ url_for('create_withdrawal_request') }}">
         <label>Coin Amount<input type="number" name="coins" min="1" max="10000000" required placeholder="কত SK Coins তুলবে"></label>
         <label>Payout Method<select name="payout_method"><option value="UPI">UPI</option><option value="Bank Transfer">Bank Transfer</option></select></label>
         <label>UPI ID / Payout Details<input type="text" name="payout_details" maxlength="200" required placeholder="তোমার UPI ID বা payout details"></label>
