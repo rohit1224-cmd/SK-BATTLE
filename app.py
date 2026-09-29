@@ -1,6 +1,9 @@
 from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify
 from pathlib import Path
-import json, os, sqlite3
+import json, os
+import psycopg
+from psycopg.rows import dict_row
+from psycopg.types.json import Jsonb
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 from dotenv import load_dotenv
@@ -23,45 +26,15 @@ DATA = Path("data")
 UPLOADS = Path("static/uploads")
 DATA.mkdir(exist_ok=True)
 UPLOADS.mkdir(parents=True, exist_ok=True)
-DB = DATA / "site.json"
-USER_DB = DATA / "users.db"
+LEGACY_DATA = DATA / "site.json"
+
+DATABASE_URL = os.environ.get("DATABASE_URL")
+if not DATABASE_URL:
+    raise RuntimeError("Missing DATABASE_URL. Set your Neon PostgreSQL connection string in the hosting environment.")
+
 def db_conn():
-    conn = sqlite3.connect(USER_DB)
-    conn.row_factory = sqlite3.Row
-    return conn
-with db_conn() as conn:
-    conn.execute("""CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL,
-        game_name TEXT NOT NULL DEFAULT '',
-        email TEXT NOT NULL COLLATE NOCASE UNIQUE, password_hash TEXT NOT NULL,
-        balance INTEGER NOT NULL DEFAULT 0, user_code TEXT UNIQUE, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)""")
-with db_conn() as conn:
-    # Migrate databases created by the earlier starter version.
-    cols = [r[1] for r in conn.execute("PRAGMA table_info(users)").fetchall()]
-    if "balance" not in cols:
-        conn.execute("ALTER TABLE users ADD COLUMN balance INTEGER NOT NULL DEFAULT 0")
-    if "game_name" not in cols:
-        conn.execute("ALTER TABLE users ADD COLUMN game_name TEXT NOT NULL DEFAULT ''")
-    if "user_code" not in cols:
-        conn.execute("ALTER TABLE users ADD COLUMN user_code TEXT")
-    # Assign stable public IDs to accounts from older versions.
-    for row in conn.execute("SELECT id FROM users WHERE user_code IS NULL OR user_code=''").fetchall():
-        conn.execute("UPDATE users SET user_code=? WHERE id=?", (f'SK{row[0]:06d}', row[0]))
-    conn.execute("""CREATE TABLE IF NOT EXISTS transactions (
-        id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL,
-        amount INTEGER NOT NULL, kind TEXT NOT NULL, note TEXT NOT NULL,
-        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)""")
-    conn.execute("""CREATE TABLE IF NOT EXISTS deposit_requests (
-        id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL,
-        amount_inr INTEGER NOT NULL, requested_coins INTEGER NOT NULL,
-        transaction_ref TEXT NOT NULL, note TEXT NOT NULL DEFAULT '',
-        status TEXT NOT NULL DEFAULT 'Pending', approved_coins INTEGER,
-        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, reviewed_at TEXT)""")
-    conn.execute("""CREATE TABLE IF NOT EXISTS registrations (
-        id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL,
-        match_id INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'Registered',
-        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE(user_id, match_id))""")
+    return psycopg.connect(DATABASE_URL, row_factory=dict_row)
+
 DEFAULT = {
     "app_name": "SK BATTLE",
     "notice": "Welcome to SK BATTLE Tournament",
@@ -71,15 +44,77 @@ DEFAULT = {
     ],
     "payments": []
 }
+
+def init_db():
+    with db_conn() as conn:
+        conn.execute("""CREATE TABLE IF NOT EXISTS users (
+            id BIGSERIAL PRIMARY KEY, username TEXT NOT NULL,
+            game_name TEXT NOT NULL DEFAULT '', email TEXT NOT NULL,
+            password_hash TEXT NOT NULL, balance INTEGER NOT NULL DEFAULT 0,
+            user_code TEXT UNIQUE, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )""")
+        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS users_email_lower_uq ON users (LOWER(email))")
+        conn.execute("""CREATE TABLE IF NOT EXISTS transactions (
+            id BIGSERIAL PRIMARY KEY, user_id BIGINT NOT NULL, amount INTEGER NOT NULL,
+            kind TEXT NOT NULL, note TEXT NOT NULL, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )""")
+        conn.execute("""CREATE TABLE IF NOT EXISTS deposit_requests (
+            id BIGSERIAL PRIMARY KEY, user_id BIGINT NOT NULL, amount_inr INTEGER NOT NULL,
+            requested_coins INTEGER NOT NULL, transaction_ref TEXT NOT NULL, note TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'Pending', approved_coins INTEGER,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, reviewed_at TIMESTAMP
+        )""")
+        conn.execute("""CREATE TABLE IF NOT EXISTS registrations (
+            id BIGSERIAL PRIMARY KEY, user_id BIGINT NOT NULL, match_id BIGINT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'Registered', created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(user_id, match_id)
+        )""")
+        conn.execute("CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+        conn.execute("""CREATE TABLE IF NOT EXISTS matches (
+            id BIGINT PRIMARY KEY, data JSONB NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0
+        )""")
+    with db_conn() as conn:
+        n = conn.execute("SELECT COUNT(*) AS n FROM app_settings").fetchone()["n"]
+    if n == 0:
+        seed = DEFAULT
+        if LEGACY_DATA.exists():
+            try:
+                seed = json.loads(LEGACY_DATA.read_text(encoding="utf-8"))
+            except Exception:
+                seed = DEFAULT
+        save_data(seed)
+
 def load_data():
-    if not DB.exists():
-        save_data(DEFAULT)
-    try:
-        return json.loads(DB.read_text(encoding="utf-8"))
-    except Exception:
-        return DEFAULT.copy()
+    with db_conn() as conn:
+        settings = {row["key"]: row["value"] for row in conn.execute("SELECT key, value FROM app_settings").fetchall()}
+        match_rows = conn.execute("SELECT data FROM matches ORDER BY sort_order, id").fetchall()
+    return {
+        "app_name": settings.get("app_name", DEFAULT["app_name"]),
+        "notice": settings.get("notice", DEFAULT["notice"]),
+        "apk_url": settings.get("apk_url", DEFAULT["apk_url"]),
+        "payments": json.loads(settings.get("payments", "[]")),
+        "matches": [row["data"] for row in match_rows],
+    }
+
 def save_data(data):
-    DB.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    with db_conn() as conn:
+        for key in ("app_name", "notice", "apk_url"):
+            conn.execute(
+                "INSERT INTO app_settings(key, value) VALUES(%s, %s) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value",
+                (key, str(data.get(key, DEFAULT.get(key, ""))))
+            )
+        conn.execute(
+            "INSERT INTO app_settings(key, value) VALUES(%s, %s) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value",
+            ("payments", json.dumps(data.get("payments", []), ensure_ascii=False))
+        )
+        conn.execute("DELETE FROM matches")
+        for order, match in enumerate(data.get("matches", [])):
+            conn.execute(
+                "INSERT INTO matches(id, data, sort_order) VALUES(%s, %s, %s)",
+                (int(match.get("id", order + 1)), Jsonb(match), order)
+            )
+
+init_db()
 
 def enrich_matches(data):
     """Attach live registration counts and normalized slot limits to matches."""
@@ -137,7 +172,7 @@ def home():
 
     data = load_data()
     with db_conn() as conn:
-        user = conn.execute("SELECT id, username, email, balance, user_code FROM users WHERE id=?", (session["user_id"],)).fetchone()
+        user = conn.execute("SELECT id, username, email, balance, user_code FROM users WHERE id=%s", (session["user_id"],)).fetchone()
     return render_template("index.html", data=data, user=user)
 
 @app.route("/signup", methods=["GET", "POST"])
@@ -154,13 +189,13 @@ def signup():
         else:
             try:
                 with db_conn() as conn:
-                    cur=conn.execute("INSERT INTO users(username,game_name,email,password_hash) VALUES(?,?,?,?)",
+                    cur=conn.execute("INSERT INTO users(username,game_name,email,password_hash) VALUES(%s,%s,%s,%s) RETURNING id",
                         (username,game_name,email,generate_password_hash(password)))
-                    uid=cur.lastrowid
-                    conn.execute("UPDATE users SET user_code=? WHERE id=?", (f"SK{uid:06d}", uid))
+                    uid=cur.fetchone()["id"]
+                    conn.execute("UPDATE users SET user_code=%s WHERE id=%s", (f"SK{uid:06d}", uid))
                 session.clear(); session["pin_verified"] = True; session["user_id"]=uid
                 return redirect(url_for("home"))
-            except sqlite3.IntegrityError:
+            except psycopg.IntegrityError:
                 flash("An account with this email already exists. Please log in.")
     return render_template("signup.html")
 
@@ -170,7 +205,7 @@ def user_login():
         email=request.form.get("email","").strip().lower()
         password=request.form.get("password","")
         with db_conn() as conn:
-            user=conn.execute("SELECT * FROM users WHERE email=?",(email,)).fetchone()
+            user=conn.execute("SELECT * FROM users WHERE email=%s",(email,)).fetchone()
         if user and check_password_hash(user["password_hash"],password):
             session.clear(); session["pin_verified"] = True; session["user_id"]=user["id"]
             return redirect(url_for("home"))
@@ -276,9 +311,9 @@ def wallet():
     if not session.get("user_id"):
         return redirect(url_for("user_login"))
     with db_conn() as conn:
-        user = conn.execute("SELECT id, username, email, balance, user_code FROM users WHERE id=?", (session["user_id"],)).fetchone()
-        txs = conn.execute("SELECT * FROM transactions WHERE user_id=? ORDER BY id DESC LIMIT 100", (session["user_id"],)).fetchall()
-        deposits = conn.execute("SELECT * FROM deposit_requests WHERE user_id=? ORDER BY id DESC LIMIT 50", (session["user_id"],)).fetchall()
+        user = conn.execute("SELECT id, username, email, balance, user_code FROM users WHERE id=%s", (session["user_id"],)).fetchone()
+        txs = conn.execute("SELECT * FROM transactions WHERE user_id=%s ORDER BY id DESC LIMIT 100", (session["user_id"],)).fetchall()
+        deposits = conn.execute("SELECT * FROM deposit_requests WHERE user_id=%s ORDER BY id DESC LIMIT 50", (session["user_id"],)).fetchall()
     return render_template("wallet.html", user=user, txs=txs, deposits=deposits)
 
 @app.route("/wallet/deposit-request", methods=["POST"])
@@ -295,7 +330,7 @@ def create_deposit_request():
     if amount < 1 or coins < 1 or amount > 10000000 or coins > 10000000 or not ref:
         flash("Please enter a valid amount, coin quantity, and transaction ID."); return redirect(url_for("wallet"))
     with db_conn() as conn:
-        conn.execute("INSERT INTO deposit_requests(user_id,amount_inr,requested_coins,transaction_ref,note) VALUES(?,?,?,?,?)",
+        conn.execute("INSERT INTO deposit_requests(user_id,amount_inr,requested_coins,transaction_ref,note) VALUES(%s,%s,%s,%s,%s)",
                      (session["user_id"], amount, coins, ref, note))
     flash("Your coin request has been sent to the Admin. Coins will be added after verification.")
     return redirect(url_for("wallet"))
@@ -308,14 +343,14 @@ def approve_deposit(req_id):
     if coins < 1 or coins > 10000000:
         flash("Coin amount must be between 1 and 10,000,000."); return redirect(url_for("admin"))
     with db_conn() as conn:
-        conn.execute("BEGIN IMMEDIATE")
-        row = conn.execute("SELECT * FROM deposit_requests WHERE id=?", (req_id,)).fetchone()
+        conn.execute("BEGIN")
+        row = conn.execute("SELECT * FROM deposit_requests WHERE id=%s", (req_id,)).fetchone()
         if not row or row["status"] != "Pending":
             conn.rollback(); flash("Request not found or it has already been reviewed."); return redirect(url_for("admin"))
-        conn.execute("UPDATE users SET balance=balance+? WHERE id=?", (coins, row["user_id"]))
-        conn.execute("INSERT INTO transactions(user_id,amount,kind,note) VALUES(?,?,?,?)",
+        conn.execute("UPDATE users SET balance=balance+%s WHERE id=%s", (coins, row["user_id"]))
+        conn.execute("INSERT INTO transactions(user_id,amount,kind,note) VALUES(%s,%s,%s,%s)",
                      (row["user_id"], coins, "Deposit Approved", f"Deposit Request #{req_id}; Ref: {row['transaction_ref']}"))
-        conn.execute("UPDATE deposit_requests SET status='Approved',approved_coins=?,reviewed_at=CURRENT_TIMESTAMP WHERE id=?", (coins, req_id))
+        conn.execute("UPDATE deposit_requests SET status='Approved',approved_coins=%s,reviewed_at=CURRENT_TIMESTAMP WHERE id=%s", (coins, req_id))
         conn.commit()
     flash(f"Request #{req_id} approved — {coins} SK Coins have been added to the user's wallet.")
     return redirect(url_for("admin"))
@@ -324,8 +359,8 @@ def approve_deposit(req_id):
 def reject_deposit(req_id):
     if not admin_required(): return redirect(url_for("admin_login"))
     with db_conn() as conn:
-        conn.execute("UPDATE deposit_requests SET status='Rejected',reviewed_at=CURRENT_TIMESTAMP WHERE id=? AND status='Pending'", (req_id,))
-        if conn.total_changes == 0:
+        cur = conn.execute("UPDATE deposit_requests SET status='Rejected',reviewed_at=CURRENT_TIMESTAMP WHERE id=%s AND status='Pending'", (req_id,))
+        if cur.rowcount == 0:
             flash("Request not found or it has already been reviewed.")
         else:
             flash(f"Request #{req_id} has been rejected.")
@@ -337,7 +372,7 @@ def my_matches():
         return redirect(url_for("user_login"))
     data = load_data()
     with db_conn() as conn:
-        rows = conn.execute("SELECT match_id,status,created_at FROM registrations WHERE user_id=? ORDER BY id DESC", (session["user_id"],)).fetchall()
+        rows = conn.execute("SELECT match_id,status,created_at FROM registrations WHERE user_id=%s ORDER BY id DESC", (session["user_id"],)).fetchall()
     registered=[]
     for row in rows:
         match = next((m for m in data["matches"] if int(m.get("id",0)) == row["match_id"]), None)
@@ -361,8 +396,8 @@ def join_match(match_id):
         flash("Registration for this tournament is closed."); return redirect(url_for("home"))
     try:
         with db_conn() as conn:
-            conn.execute("BEGIN IMMEDIATE")
-            if conn.execute("SELECT 1 FROM registrations WHERE user_id=? AND match_id=?",(session["user_id"],match_id)).fetchone():
+            conn.execute("BEGIN")
+            if conn.execute("SELECT 1 FROM registrations WHERE user_id=%s AND match_id=%s",(session["user_id"],match_id)).fetchone():
                 conn.rollback(); flash("You have already joined this tournament."); return redirect(url_for("my_matches"))
             try:
                 max_slots = int(match.get("max_slots", 0) or 0)
@@ -372,21 +407,21 @@ def join_match(match_id):
                 import re
                 nums = re.findall(r"\\d+", str(match.get("slots", "")))
                 max_slots = int(nums[-1]) if len(nums) >= 2 else (int(nums[0]) if nums else 48)
-            count = conn.execute("SELECT COUNT(*) FROM registrations WHERE match_id=? AND status='Registered'", (match_id,)).fetchone()[0]
+            count = conn.execute("SELECT COUNT(*) AS n FROM registrations WHERE match_id=%s AND status='Registered'", (match_id,)).fetchone()["n"]
             if count >= max_slots:
                 conn.rollback()
                 flash("This tournament is full. Registration is closed.")
                 return redirect(url_for("home"))
-            u=conn.execute("SELECT balance FROM users WHERE id=?",(session["user_id"],)).fetchone()
+            u=conn.execute("SELECT balance FROM users WHERE id=%s",(session["user_id"],)).fetchone()
             if not u or u["balance"] < fee:
                 conn.rollback(); flash(f"Insufficient SK Coins. Entry fee: {fee} SK Coins."); return redirect(url_for("wallet"))
-            conn.execute("UPDATE users SET balance=balance-? WHERE id=?",(fee,session["user_id"]))
-            conn.execute("INSERT INTO registrations(user_id,match_id) VALUES(?,?)",(session["user_id"],match_id))
+            conn.execute("UPDATE users SET balance=balance-%s WHERE id=%s",(fee,session["user_id"]))
+            conn.execute("INSERT INTO registrations(user_id,match_id) VALUES(%s,%s)",(session["user_id"],match_id))
             if fee:
-                conn.execute("INSERT INTO transactions(user_id,amount,kind,note) VALUES(?,?,?,?)",(session["user_id"],-fee,"Entry Fee",f"Tournament: {match['title']}"))
+                conn.execute("INSERT INTO transactions(user_id,amount,kind,note) VALUES(%s,%s,%s,%s)",(session["user_id"],-fee,"Entry Fee",f"Tournament: {match['title']}"))
             conn.commit()
         flash("You have successfully joined the tournament!")
-    except sqlite3.IntegrityError:
+    except psycopg.IntegrityError:
         flash("You have already joined this tournament.")
     return redirect(url_for("my_matches"))
 
@@ -400,11 +435,11 @@ def admin_credit():
     if amount <= 0 or amount > 10000000:
         flash("Coin amount must be between 1 and 10,000,000 SK Coins."); return redirect(url_for("admin"))
     with db_conn() as conn:
-        u=conn.execute("SELECT id FROM users WHERE id=?",(uid,)).fetchone()
+        u=conn.execute("SELECT id FROM users WHERE id=%s",(uid,)).fetchone()
         if not u:
             flash("User not found."); return redirect(url_for("admin"))
-        conn.execute("UPDATE users SET balance=balance+? WHERE id=?",(amount,uid))
-        conn.execute("INSERT INTO transactions(user_id,amount,kind,note) VALUES(?,?,?,?)",(uid,amount,"Admin Credit","Admin added SK Coin"))
+        conn.execute("UPDATE users SET balance=balance+%s WHERE id=%s",(amount,uid))
+        conn.execute("INSERT INTO transactions(user_id,amount,kind,note) VALUES(%s,%s,%s,%s)",(uid,amount,"Admin Credit","Admin added SK Coin"))
     flash(f"{amount} SK Coins have been added to the user's wallet.")
     return redirect(url_for("admin"))
 
@@ -422,8 +457,8 @@ def admin_debit():
         flash("Coin amount must be between 1 and 10,000,000.")
         return redirect(url_for("admin"))
     with db_conn() as conn:
-        conn.execute("BEGIN IMMEDIATE")
-        user = conn.execute("SELECT balance FROM users WHERE id=?", (uid,)).fetchone()
+        conn.execute("BEGIN")
+        user = conn.execute("SELECT balance FROM users WHERE id=%s", (uid,)).fetchone()
         if not user:
             conn.rollback()
             flash("User not found.")
@@ -432,8 +467,8 @@ def admin_debit():
             conn.rollback()
             flash("User does not have enough coins.")
             return redirect(url_for("admin"))
-        conn.execute("UPDATE users SET balance=balance-? WHERE id=?", (amount, uid))
-        conn.execute("INSERT INTO transactions(user_id,amount,kind,note) VALUES(?,?,?,?)",
+        conn.execute("UPDATE users SET balance=balance-%s WHERE id=%s", (amount, uid))
+        conn.execute("INSERT INTO transactions(user_id,amount,kind,note) VALUES(%s,%s,%s,%s)",
                      (uid, -amount, "Admin Debit", "Coins deducted by Admin"))
         conn.commit()
     flash(f"{amount} SK Coins deducted from user #{uid}.")
