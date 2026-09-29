@@ -64,6 +64,12 @@ def init_db():
             status TEXT NOT NULL DEFAULT 'Pending', approved_coins INTEGER,
             created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, reviewed_at TIMESTAMP
         )""")
+        conn.execute("""CREATE TABLE IF NOT EXISTS withdrawal_requests (
+            id BIGSERIAL PRIMARY KEY, user_id BIGINT NOT NULL, coins INTEGER NOT NULL,
+            payout_method TEXT NOT NULL, payout_details TEXT NOT NULL, note TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'Pending', created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            reviewed_at TIMESTAMP
+        )""")
         conn.execute("""CREATE TABLE IF NOT EXISTS registrations (
             id BIGSERIAL PRIMARY KEY, user_id BIGINT NOT NULL, match_id BIGINT NOT NULL,
             status TEXT NOT NULL DEFAULT 'Registered', created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -130,7 +136,7 @@ def enrich_matches(data):
         # Migrate old "current/maximum" slot text when no explicit limit exists.
         if limit <= 0:
             import re
-            parts = re.findall(r"\\d+", str(match.get("slots", "")))
+            parts = re.findall(r"\d+", str(match.get("slots", "")))
             limit = int(parts[-1]) if len(parts) >= 2 else (int(parts[0]) if parts else 48)
         count = int(counts.get(int(match.get("id", 0)), 0))
         match["max_slots"] = max(1, limit)
@@ -170,7 +176,7 @@ def home():
     if not session.get("user_id"):
         return redirect(url_for("user_login"))
 
-    data = load_data()
+    data = enrich_matches(load_data())
     with db_conn() as conn:
         user = conn.execute("SELECT id, username, email, balance, user_code FROM users WHERE id=%s", (session["user_id"],)).fetchone()
     return render_template("index.html", data=data, user=user)
@@ -241,7 +247,7 @@ def admin_required():
 def admin():
     if not admin_required():
         return redirect(url_for("admin_login"))
-    data = load_data()
+    data = enrich_matches(load_data())
     if request.method == "POST":
         data["app_name"] = request.form.get("app_name", "SK BATTLE").strip() or "SK BATTLE"
         data["notice"] = request.form.get("notice", "").strip()
@@ -252,7 +258,8 @@ def admin():
     with db_conn() as conn:
         users=conn.execute("SELECT id, username, email, balance, user_code, created_at FROM users ORDER BY id DESC").fetchall()
         deposits=conn.execute("SELECT d.*,u.username,u.user_code,u.email FROM deposit_requests d JOIN users u ON u.id=d.user_id ORDER BY CASE d.status WHEN 'Pending' THEN 0 ELSE 1 END, d.id DESC LIMIT 200").fetchall()
-    return render_template("admin.html", data=data, users=users, deposits=deposits)
+        withdrawals=conn.execute("SELECT w.*,u.username,u.user_code,u.email FROM withdrawal_requests w JOIN users u ON u.id=w.user_id ORDER BY CASE w.status WHEN 'Pending' THEN 0 ELSE 1 END, w.id DESC LIMIT 200").fetchall()
+    return render_template("admin.html", data=data, users=users, deposits=deposits, withdrawals=withdrawals)
 
 @app.route("/admin/match/add", methods=["POST"])
 def add_match():
@@ -314,7 +321,8 @@ def wallet():
         user = conn.execute("SELECT id, username, email, balance, user_code FROM users WHERE id=%s", (session["user_id"],)).fetchone()
         txs = conn.execute("SELECT * FROM transactions WHERE user_id=%s ORDER BY id DESC LIMIT 100", (session["user_id"],)).fetchall()
         deposits = conn.execute("SELECT * FROM deposit_requests WHERE user_id=%s ORDER BY id DESC LIMIT 50", (session["user_id"],)).fetchall()
-    return render_template("wallet.html", user=user, txs=txs, deposits=deposits)
+        withdrawals = conn.execute("SELECT * FROM withdrawal_requests WHERE user_id=%s ORDER BY id DESC LIMIT 50", (session["user_id"],)).fetchall()
+    return render_template("wallet.html", user=user, txs=txs, deposits=deposits, withdrawals=withdrawals)
 
 @app.route("/wallet/deposit-request", methods=["POST"])
 def create_deposit_request():
@@ -405,7 +413,7 @@ def join_match(match_id):
                 max_slots = 0
             if max_slots <= 0:
                 import re
-                nums = re.findall(r"\\d+", str(match.get("slots", "")))
+                nums = re.findall(r"\d+", str(match.get("slots", "")))
                 max_slots = int(nums[-1]) if len(nums) >= 2 else (int(nums[0]) if nums else 48)
             count = conn.execute("SELECT COUNT(*) AS n FROM registrations WHERE match_id=%s AND status='Registered'", (match_id,)).fetchone()["n"]
             if count >= max_slots:
@@ -424,6 +432,73 @@ def join_match(match_id):
     except psycopg.IntegrityError:
         flash("You have already joined this tournament.")
     return redirect(url_for("my_matches"))
+
+@app.route("/wallet/withdrawal-request", methods=["POST"])
+def create_withdrawal_request():
+    if not session.get("user_id"):
+        return redirect(url_for("user_login"))
+    try:
+        coins = int(request.form.get("coins", "0"))
+    except (TypeError, ValueError):
+        flash("Please enter a valid coin amount.")
+        return redirect(url_for("wallet"))
+    method = request.form.get("payout_method", "").strip()
+    details = request.form.get("payout_details", "").strip()
+    note = request.form.get("note", "").strip()
+    if coins < 1 or coins > 10000000 or method not in ("UPI", "Bank Transfer") or not details or len(details) > 200:
+        flash("Please enter valid withdrawal details.")
+        return redirect(url_for("wallet"))
+    with db_conn() as conn:
+        conn.execute("BEGIN")
+        cur = conn.execute("UPDATE users SET balance=balance-%s WHERE id=%s AND balance >= %s", (coins, session["user_id"], coins))
+        if cur.rowcount == 0:
+            conn.rollback()
+            flash("Insufficient SK Coins for this withdrawal.")
+            return redirect(url_for("wallet"))
+        conn.execute("INSERT INTO withdrawal_requests(user_id,coins,payout_method,payout_details,note) VALUES(%s,%s,%s,%s,%s)",
+                     (session["user_id"], coins, method, details, note))
+        conn.execute("INSERT INTO transactions(user_id,amount,kind,note) VALUES(%s,%s,%s,%s)",
+                     (session["user_id"], -coins, "Withdrawal Hold", f"Withdrawal request; {method}"))
+        conn.commit()
+    flash("Withdrawal request sent. Coins are held until Admin reviews the request.")
+    return redirect(url_for("wallet"))
+
+@app.route("/admin/withdrawal/<int:req_id>/approve", methods=["POST"])
+def approve_withdrawal(req_id):
+    if not admin_required():
+        return redirect(url_for("admin_login"))
+    with db_conn() as conn:
+        conn.execute("BEGIN")
+        row = conn.execute("SELECT * FROM withdrawal_requests WHERE id=%s FOR UPDATE", (req_id,)).fetchone()
+        if not row or row["status"] != "Pending":
+            conn.rollback()
+            flash("Withdrawal request not found or already reviewed.")
+            return redirect(url_for("admin"))
+        conn.execute("UPDATE withdrawal_requests SET status='Approved',reviewed_at=CURRENT_TIMESTAMP WHERE id=%s", (req_id,))
+        conn.execute("INSERT INTO transactions(user_id,amount,kind,note) VALUES(%s,%s,%s,%s)",
+                     (row["user_id"], 0, "Withdrawal Approved", f"Withdrawal #{req_id} approved; payout should be sent to {row['payout_method']}"))
+        conn.commit()
+    flash(f"Withdrawal request #{req_id} marked Approved. Remember to send the payout manually.")
+    return redirect(url_for("admin"))
+
+@app.route("/admin/withdrawal/<int:req_id>/reject", methods=["POST"])
+def reject_withdrawal(req_id):
+    if not admin_required():
+        return redirect(url_for("admin_login"))
+    with db_conn() as conn:
+        conn.execute("BEGIN")
+        row = conn.execute("SELECT * FROM withdrawal_requests WHERE id=%s FOR UPDATE", (req_id,)).fetchone()
+        if not row or row["status"] != "Pending":
+            conn.rollback()
+            flash("Withdrawal request not found or already reviewed.")
+            return redirect(url_for("admin"))
+        conn.execute("UPDATE users SET balance=balance+%s WHERE id=%s", (row["coins"], row["user_id"]))
+        conn.execute("UPDATE withdrawal_requests SET status='Rejected',reviewed_at=CURRENT_TIMESTAMP WHERE id=%s", (req_id,))
+        conn.execute("INSERT INTO transactions(user_id,amount,kind,note) VALUES(%s,%s,%s,%s)",
+                     (row["user_id"], row["coins"], "Withdrawal Refunded", f"Withdrawal request #{req_id} rejected; coins returned"))
+        conn.commit()
+    flash(f"Withdrawal request #{req_id} rejected. {row['coins']} SK Coins returned to the user.")
+    return redirect(url_for("admin"))
 
 @app.route("/admin/wallet/credit", methods=["POST"])
 def admin_credit():
@@ -476,7 +551,7 @@ def admin_debit():
 
 @app.route("/api/data")
 def api_data():
-    return jsonify(load_data())
+    return jsonify(enrich_matches(load_data()))
 
 if __name__ == "__main__":
     app.run(debug=False)
