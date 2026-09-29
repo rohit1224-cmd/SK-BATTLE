@@ -39,7 +39,7 @@
           <div><small>SLOTS</small><strong>{{ match.registered_count }}/{{ match.max_slots }}</strong></div>
         </div>
         {% if user %}
-        {% if match.registered_count >= match.max_slots or match.status == 'Slot Full' %}
+        {% if match.get('registered_count', 0)|int >= match.get('max_slots', 999999)|int or match.get('status', '') == 'Slot Full' %}
           <button class="btn btn-outline btn-block" type="button" disabled>Slots Full</button>
         {% elif match.status|lower in ['registration open', 'open', 'registration is open'] %}
         <form method="post" action="{{ url_for('join_match', match_id=match.id) }}" data-confirm="Do you want to join this tournament?">
