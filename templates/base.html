@@ -72,5 +72,26 @@
   © {{ data.app_name if data is defined else 'SK BATTLE' }} · Play fair. Battle hard.
 </footer>
 
+<!-- Service Worker Registration -->
+<script>
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", function () {
+      navigator.serviceWorker.register(
+        "{{ url_for('static', filename='service-worker.js') }}"
+      ).then(function (registration) {
+        console.log(
+          "SK BATTLE Service Worker registered:",
+          registration.scope
+        );
+      }).catch(function (error) {
+        console.error(
+          "SK BATTLE Service Worker registration failed:",
+          error
+        );
+      });
+    });
+  }
+</script>
+
 </body>
 </html>
