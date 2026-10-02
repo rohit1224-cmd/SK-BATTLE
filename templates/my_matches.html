@@ -10,6 +10,7 @@
 
 {% if registered %}
 <div class="match-grid">
+
     {% for item in registered %}
     {% set match = item.match %}
 
@@ -44,7 +45,15 @@
                     <small>PRIZE POOL</small>
                     <strong class="prize">{{ match.prize }}</strong>
                 </div>
+                <div>
+                    <small>SLOTS</small>
+                    <strong>{{ match.registered_count }}/{{ match.max_slots }}</strong>
+                </div>
             </div>
+
+            <a class="btn btn-outline btn-block" href="{{ url_for('match_players', match_id=match.id) }}">
+                View Registered Players
+            </a>
 
             {% if match.room_id %}
             <div class="room-box">
