@@ -1,59 +1,136 @@
 {% extends "base.html" %}
 {% block title %}{{ data.app_name }} — Tournament{% endblock %}
 {% block content %}
+
 <section class="hero">
   <div class="hero-copy">
     <div class="eyebrow">YOUR BATTLE. YOUR GLORY.</div>
     <h1>Fight to Win,<br><span>Enter the Battle!</span></h1>
     <p>{{ data.notice }}</p>
+
     <div class="hero-actions">
-      {% if user %}<a class="btn btn-primary" href="{{ url_for('my_matches') }}">My Matches</a>
-      {% else %}<a class="btn btn-primary" href="{{ url_for('signup') }}">Join Now</a>{% endif %}
+      {% if user %}
+        <a class="btn btn-primary" href="{{ url_for('my_matches') }}">My Matches</a>
+      {% else %}
+        <a class="btn btn-primary" href="{{ url_for('signup') }}">Join Now</a>
+      {% endif %}
       <a class="btn btn-outline" href="#tournaments">View Tournaments</a>
     </div>
   </div>
-  <div class="hero-badge"><div class="badge-ring">SK</div><strong>BATTLE ARENA</strong><small>TOURNAMENT HUB</small></div>
+
+  <div class="hero-badge">
+    <div class="badge-ring">SK</div>
+    <strong>BATTLE ARENA</strong>
+    <small>TOURNAMENT HUB</small>
+  </div>
 </section>
+
 {% if user %}
 <section class="welcome-row">
-  <div><span class="muted">Welcome,</span><h2>{{ user.username }}</h2><small class="muted">Player ID: {{ user.user_code }}</small></div>
-  <a class="balance-card" href="{{ url_for('wallet') }}"><span>Your Balance</span><strong>🪙 {{ user.balance }} SK Coin</strong><small>Open Wallet →</small></a>
+  <div>
+    <span class="muted">Welcome,</span>
+    <h2>{{ user.username }}</h2>
+    <small class="muted">Player ID: {{ user.user_code }}</small>
+  </div>
+
+  <a class="balance-card" href="{{ url_for('wallet') }}">
+    <span>Your Balance</span>
+    <strong>🪙 {{ user.balance }} SK Coin</strong>
+    <small>Open Wallet →</small>
+  </a>
 </section>
 {% endif %}
+
 <section id="tournaments" class="section">
-  <div class="section-heading"><div><div class="eyebrow">READY TO PLAY?</div><h2>Ongoing Tournaments</h2></div><span class="pill">{{ data.matches|length }} Matches</span></div>
+  <div class="section-heading">
+    <div>
+      <div class="eyebrow">READY TO PLAY?</div>
+      <h2>Ongoing Tournaments</h2>
+    </div>
+    <span class="pill">{{ data.matches|length }} Matches</span>
+  </div>
+
   {% if data.matches %}
   <div class="match-grid">
-  {% for match in data.matches %}
+
+    {% for match in data.matches %}
     <article class="match-card">
+
       <div class="match-cover">
-        {% if match.image %}<img src="{{ match.image }}" alt="{{ match.title }}">{% else %}<div class="cover-placeholder"><span>SK</span><small> BATTLE ARENA</small></div>{% endif %}
+        {% if match.image %}
+          <img src="{{ match.image }}" alt="{{ match.title }}">
+        {% else %}
+          <div class="cover-placeholder">
+            <span>SK</span>
+            <small>BATTLE ARENA</small>
+          </div>
+        {% endif %}
         <span class="status">{{ match.status }}</span>
       </div>
+
       <div class="match-body">
-        <div class="eyebrow">{{ match.game }}</div><h3>{{ match.title }}</h3>
-        <div class="match-meta"><span>📅 {{ match.date }}</span><span>🕒 {{ match.time }}</span></div>
-        <div class="match-stats">
-          <div><small>ENTRY FEE</small><strong>{{ match.entry }}</strong></div>
-          <div><small>PRIZE POOL</small><strong class="prize">{{ match.prize }}</strong></div>
-          <div><small>SLOTS</small><strong>{{ match.registered_count }}/{{ match.max_slots }}</strong></div>
+        <div class="eyebrow">{{ match.game }}</div>
+        <h3>{{ match.title }}</h3>
+
+        <div class="match-meta">
+          <span>📅 {{ match.date }}</span>
+          <span>🕒 {{ match.time }}</span>
         </div>
-        {% if user %}
-        {% if match.get('registered_count', 0)|int >= match.get('max_slots', 999999)|int or match.get('status', '') == 'Slot Full' %}
-          <button class="btn btn-outline btn-block" type="button" disabled>Slots Full</button>
-        {% elif match.status|lower in ['registration open', 'open', 'registration is open'] %}
-        <form method="post" action="{{ url_for('join_match', match_id=match.id) }}" data-confirm="Do you want to join this tournament?">
-          <button class="btn btn-primary btn-block" type="submit">Join Tournament</button>
-        </form>
-        {% else %}
-          <button class="btn btn-outline btn-block" type="button" disabled>Registration Closed</button>
-        {% endif %}
-        {% else %}<a class="btn btn-primary btn-block" href="{{ url_for('user_login') }}">Log In to Join</a>{% endif %}
+
+        <div class="match-stats">
+          <div>
+            <small>ENTRY FEE</small>
+            <strong>{{ match.entry }}</strong>
+          </div>
+
+          <div>
+            <small>PRIZE POOL</small>
+            <strong class="prize">{{ match.prize }}</strong>
+          </div>
+
+          <div>
+            <small>SLOTS</small>
+            <strong>{{ match.registered_count }}/{{ match.max_slots }}</strong>
+          </div>
+        </div>
+
+        <div class="match-actions">
+          {% if user %}
+            {% if match.get('registered_count', 0)|int >= match.get('max_slots', 999999)|int or match.get('status', '') == 'Slot Full' %}
+              <button class="btn btn-outline btn-block" type="button" disabled>Slots Full</button>
+            {% elif match.status|lower in ['registration open', 'open', 'registration is open'] %}
+              <form method="post" action="{{ url_for('join_match', match_id=match.id) }}" data-confirm="Do you want to join this tournament?">
+                <button class="btn btn-primary btn-block" type="submit">Join Tournament</button>
+              </form>
+            {% else %}
+              <button class="btn btn-outline btn-block" type="button" disabled>Registration Closed</button>
+            {% endif %}
+          {% else %}
+            <a class="btn btn-primary btn-block" href="{{ url_for('user_login') }}">Log In to Join</a>
+          {% endif %}
+
+          <a class="btn btn-outline btn-block" href="{{ url_for('match_players', match_id=match.id) }}">
+            View Registered Players
+          </a>
+        </div>
       </div>
+
     </article>
-  {% endfor %}
+    {% endfor %}
+
   </div>
-  {% else %}<div class="empty-state">No tournaments available right now. Please check back later.</div>{% endif %}
+  {% else %}
+    <div class="empty-state">No tournaments available right now. Please check back later.</div>
+  {% endif %}
 </section>
-{% if data.apk_url %}<section class="download-banner"><div><h3>Download SK BATTLE App</h3><p>Download the app to play on your mobile device.</p></div><a class="btn btn-primary" href="{{ data.apk_url }}" target="_blank" rel="noopener">Download</a></section>{% endif %}
+
+{% if data.apk_url %}
+<section class="download-banner">
+  <div>
+    <h3>Download SK BATTLE App</h3>
+    <p>Download the app to play on your mobile device.</p>
+  </div>
+  <a class="btn btn-primary" href="{{ data.apk_url }}" target="_blank" rel="noopener">Download</a>
+</section>
+{% endif %}
 {% endblock %}
