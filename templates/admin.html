@@ -353,60 +353,35 @@
                 style="margin: 14px 0;"
             >
 
-                <h3>
-                    Registered Players —
-                    {{ m.registered_count }}/{{ m.max_slots }}
-                </h3>
+                <div class="panel-heading">
+                    <div>
+                        <h3>Registered Players</h3>
+                        <p class="muted">Only in-game names are displayed.</p>
+                    </div>
+
+                    <span class="pill">
+                        {{ m.registered_count }}/{{ m.max_slots }}
+                    </span>
+                </div>
 
                 {% if m.players %}
 
                 <table>
 
                     <thead>
-
                         <tr>
-                            <th>User ID</th>
-                            <th>Player Code</th>
-                            <th>Account Name</th>
-                            <th>Game Name / ID</th>
-                            <th>Status</th>
-                            <th>Joined</th>
+                            <th>In-Game Name</th>
                         </tr>
-
                     </thead>
 
                     <tbody>
 
                         {% for p in m.players %}
-
                         <tr>
-
                             <td>
-                                {{ p.id }}
+                                <strong>{{ p.game_name }}</strong>
                             </td>
-
-                            <td>
-                                {{ p.user_code }}
-                            </td>
-
-                            <td>
-                                {{ p.username }}
-                            </td>
-
-                            <td>
-                                {{ p.game_name or '—' }}
-                            </td>
-
-                            <td>
-                                {{ p.status }}
-                            </td>
-
-                            <td>
-                                {{ p.created_at }}
-                            </td>
-
                         </tr>
-
                         {% endfor %}
 
                     </tbody>
@@ -420,6 +395,12 @@
                     </p>
 
                 {% endif %}
+
+                <div style="margin-top: 14px;">
+                    <a class="btn btn-outline" href="{{ url_for('match_players', match_id=m.id) }}">
+                        Open Full Player List
+                    </a>
+                </div>
 
             </div>
 
