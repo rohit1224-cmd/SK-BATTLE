@@ -259,6 +259,26 @@ def admin():
         users=conn.execute("SELECT id, username, email, balance, user_code, created_at FROM users ORDER BY id DESC").fetchall()
         deposits=conn.execute("SELECT d.*,u.username,u.user_code,u.email FROM deposit_requests d JOIN users u ON u.id=d.user_id ORDER BY CASE d.status WHEN 'Pending' THEN 0 ELSE 1 END, d.id DESC LIMIT 200").fetchall()
         withdrawals=conn.execute("SELECT w.*,u.username,u.user_code,u.email FROM withdrawal_requests w JOIN users u ON u.id=w.user_id ORDER BY CASE w.status WHEN 'Pending' THEN 0 ELSE 1 END, w.id DESC LIMIT 200").fetchall()
+
+        player_rows = conn.execute("""
+            SELECT r.match_id, u.game_name, r.status, r.created_at
+            FROM registrations r
+            JOIN users u ON u.id = r.user_id
+            WHERE r.status = 'Registered'
+            ORDER BY r.id ASC
+        """).fetchall()
+
+    players_by_match = {}
+    for player in player_rows:
+        players_by_match.setdefault(int(player["match_id"]), []).append({
+            "game_name": player["game_name"],
+            "status": player["status"],
+            "created_at": player["created_at"],
+        })
+
+    for match in data.get("matches", []):
+        match["players"] = players_by_match.get(int(match.get("id", 0)), [])
+
     return render_template("admin.html", data=data, users=users, deposits=deposits, withdrawals=withdrawals)
 
 @app.route("/admin/match/add", methods=["POST"])
@@ -387,6 +407,38 @@ def my_matches():
         if match:
             registered.append({"match": match, "status": row["status"], "created_at": row["created_at"]})
     return render_template("my_matches.html", registered=registered)
+
+@app.route("/match/<int:match_id>/players")
+def match_players(match_id):
+    if not session.get("user_id") and not admin_required():
+        return redirect(url_for("user_login"))
+
+    data = enrich_matches(load_data())
+    match = next(
+        (m for m in data["matches"] if int(m.get("id", 0)) == match_id),
+        None
+    )
+
+    if not match:
+        flash("Tournament not found.")
+        return redirect(url_for("home"))
+
+    with db_conn() as conn:
+        players = conn.execute("""
+            SELECT u.game_name
+            FROM registrations r
+            JOIN users u ON u.id = r.user_id
+            WHERE r.match_id = %s
+              AND r.status = 'Registered'
+            ORDER BY r.id ASC
+        """, (match_id,)).fetchall()
+
+    return render_template(
+        "match_players.html",
+        match=match,
+        players=players
+    )
+
 
 @app.route("/match/<int:match_id>/join", methods=["POST"])
 def join_match(match_id):
